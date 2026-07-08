@@ -1,20 +1,14 @@
 """
-PR #2 — List Stats Feature
-============================
-Proposed additions for the list statistics endpoint.
+PR #2 — List Stats Feature (CORRECTED)
+========================================
+Fixes applied:
+  1. by_category counts only unpurchased (remaining) items, matching the
+     frontend team's request: "break down what's remaining by category."
+  2. Returns 404 if the list_id does not exist, consistent with the rest of the API.
 
-Use case (from the frontend team's request):
-    "We need a stats endpoint for the active shopping view — show users
-    how many items are still on their list and break down what's left
-    by category so they can navigate the store by section."
-
-To test this code without modifying the main app, run:
+To test:
     python try_prs.py
 then use the curl examples in pr2_description.md.
-
-To integrate permanently (not required for the review):
-  1. Copy get_list_stats() into services/list_service.py
-  2. Copy the list_stats() route into routes/lists.py
 """
 
 # ---------------------------------------------------------------------------
@@ -30,8 +24,15 @@ def get_list_stats(list_id: str) -> dict:
         total_items  — total number of items on the list
         purchased    — number of items marked as purchased
         remaining    — number of items not yet purchased
-        by_category  — item counts grouped by category
+        by_category  — remaining item counts grouped by category
+
+    Raises:
+        ValueError: If the list does not exist.
     """
+    grocery_list = db.session.get(GroceryList, list_id)
+    if not grocery_list:
+        raise ValueError(f"List {list_id!r} not found")
+
     items = Item.query.filter_by(list_id=list_id).all()
 
     total = len(items)
@@ -40,8 +41,9 @@ def get_list_stats(list_id: str) -> dict:
 
     by_category = {}
     for item in items:
-        cat = item.category or "uncategorized"
-        by_category[cat] = by_category.get(cat, 0) + 1
+        if not item.is_purchased:
+            cat = item.category or "uncategorized"
+            by_category[cat] = by_category.get(cat, 0) + 1
 
     return {
         "list_id": list_id,
@@ -59,5 +61,8 @@ def get_list_stats(list_id: str) -> dict:
 @lists_bp.route("/<list_id>/stats", methods=["GET"])
 def list_stats(list_id):
     """Return summary statistics for a grocery list."""
-    stats = list_service.get_list_stats(list_id)
-    return jsonify(stats), 200
+    try:
+        stats = list_service.get_list_stats(list_id)
+        return jsonify(stats), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
